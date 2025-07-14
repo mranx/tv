@@ -4,10 +4,18 @@ export default async function handler(req, res) {
   try {
     const plainText = req.body; // TradingView sends plain text
 
+    // Create custom message
+    const customMessage = `GOLD 5M TF
+
+**make sure it should be in 1H PD arrays. If you can check SMT it would be A+ setup,**
+
+${plainText}`;
+
+    // Send to Discord
     const response = await fetch(DISCORD_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: plainText })
+      body: JSON.stringify({ content: customMessage })
     });
 
     res.status(200).json({ message: "Sent to Discord", discordStatus: response.status });
