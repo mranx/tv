@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1386071196499447939/Db-bo24Uyv9afCL6cbrO50vOMyfY9xNTsdqZCM_hOaLRnqe76bAKDjd0VdA6rW13Lk0A";
+  const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1394021400968429700/WS5Qop5z6eCZF0qT8lxFwHwriPaxGvY6USeeVl0f4xwXm5HirGGto3zsWbBSSg-FKOSf";
 
   try {
     const plainText = req.body; // TradingView sends plain text
