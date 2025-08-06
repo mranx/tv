@@ -1,25 +1,69 @@
+// api/forward-to-discord.js
 export default async function handler(req, res) {
-  const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1394021400968429700/WS5Qop5z6eCZF0qT8lxFwHwriPaxGvY6USeeVl0f4xwXm5HirGGto3zsWbBSSg-FKOSf";
+  // Put your Discord webhook URL here
+  const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1402536555465146388/XYh0sDNNH3XBAaxRAjRjGvDIQhzLaXkUkrr900NJCJX2fcxfYltcnXMV2OwWdUBuM-99";
 
   try {
-    const plainText = req.body; // TradingView sends plain text
+    // TradingView normally sends plain text. If it's parsed JSON, convert to string.
+    let body = req.body;
+    if (typeof body === "object") {
+      // sometimes a body parser gives an object; stringify it to preserve content
+      body = JSON.stringify(body);
+    } else if (body === undefined || body === null) {
+      body = "";
+    }
 
-    // Create custom message
-    const customMessage = `GOLD 5M TF
+    // Only forward alerts containing "CISD Formed"
+    if (!body.includes("CISD Formed")) {
+      return res.status(200).json({ message: "Ignored: not CISD Formed" });
+    }
 
-**make sure it should be in 1H PD arrays. If you can check SMT it would be A+ setup,**
+    // Helper to send to Discord with retry for 429
+    async function sendToDiscord(content, attempt = 1) {
+      const maxAttempts = 4;
+      const response = await fetch(DISCORD_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content })
+      });
 
-${plainText}`;
+      if (response.status === 429 && attempt < maxAttempts) {
+        // Discord may include retry info in JSON or headers
+        let waitMs = 1000 * Math.pow(2, attempt - 1); // exponential backoff: 1s,2s,4s...
+        try {
+          const data = await response.json();
+          if (data && data.retry_after) {
+            // retry_after often in seconds or ms depending on endpoint; assume seconds if small
+            const val = Number(data.retry_after);
+            if (!Number.isNaN(val)) {
+              waitMs = val > 10 ? val : val * 1000; // try best effort
+            }
+          }
+        } catch (e) {
+          // ignore parse errors, use backoff
+        }
+        await new Promise((r) => setTimeout(r, waitMs));
+        return sendToDiscord(content, attempt + 1);
+      }
 
-    // Send to Discord
-    const response = await fetch(DISCORD_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: customMessage })
-    });
+      return response;
+    }
 
-    res.status(200).json({ message: "Sent to Discord", discordStatus: response.status });
+    // Forward the exact alert text to Discord
+    const discordResp = await sendToDiscord(body);
+
+    // If still error, surface it
+    if (!discordResp.ok) {
+      const text = await discordResp.text().catch(() => "");
+      return res.status(500).json({
+        message: "Failed to send to Discord",
+        status: discordResp.status,
+        body: text
+      });
+    }
+
+    return res.status(200).json({ message: "Sent to Discord", status: discordResp.status });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 }
