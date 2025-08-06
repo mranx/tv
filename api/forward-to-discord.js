@@ -1,20 +1,51 @@
 // api/forward-to-discord.js
 export default async function handler(req, res) {
-  // Put your Discord webhook URL here
   const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1402536555465146388/XYh0sDNNH3XBAaxRAjRjGvDIQhzLaXkUkrr900NJCJX2fcxfYltcnXMV2OwWdUBuM-99";
 
   try {
-    // TradingView normally sends plain text. If it's parsed JSON, convert to string.
+    // Get the body and turn it into a clean multiline string while preserving newlines
     let body = req.body;
-    if (typeof body === "object") {
-      // sometimes a body parser gives an object; stringify it to preserve content
-      body = JSON.stringify(body);
-    } else if (body === undefined || body === null) {
-      body = "";
+
+    // If body is an object (parsed JSON or form), try to extract readable text.
+    if (typeof body === "object" && body !== null) {
+      // If there is a top-level text/content/message field, prefer that
+      const preferKeys = ["text", "content", "message", "alert_message", "body"];
+      for (const k of preferKeys) {
+        if (k in body && typeof body[k] === "string" && body[k].trim() !== "") {
+          body = body[k];
+          break;
+        }
+      }
+
+      // If still an object, convert object -> multiline string by joining values
+      if (typeof body === "object") {
+        const values = [];
+        for (const key of Object.keys(body)) {
+          const v = body[key];
+          if (v === null || v === undefined) continue;
+          if (typeof v === "string" && v.trim() !== "") {
+            values.push(v);
+          } else if (typeof v === "object") {
+            try {
+              values.push(JSON.stringify(v));
+            } catch {
+              // fallback
+              values.push(String(v));
+            }
+          } else {
+            values.push(String(v));
+          }
+        }
+        body = values.join("\n");
+      }
     }
 
-    // Only forward alerts containing "CISD Formed"
-    if (!body.includes("CISD Formed")) {
+    // Ensure final body is a string
+    if (body === undefined || body === null) body = "";
+    body = String(body);
+
+    // Case-insensitive check for "CISD Formed"
+    if (!body.toLowerCase().includes("cisd formed")) {
       return res.status(200).json({ message: "Ignored: not CISD Formed" });
     }
 
@@ -28,19 +59,19 @@ export default async function handler(req, res) {
       });
 
       if (response.status === 429 && attempt < maxAttempts) {
-        // Discord may include retry info in JSON or headers
-        let waitMs = 1000 * Math.pow(2, attempt - 1); // exponential backoff: 1s,2s,4s...
+        // Backoff and retry
+        let waitMs = 1000 * Math.pow(2, attempt - 1); // 1s, 2s, 4s...
         try {
           const data = await response.json();
           if (data && data.retry_after) {
-            // retry_after often in seconds or ms depending on endpoint; assume seconds if small
             const val = Number(data.retry_after);
             if (!Number.isNaN(val)) {
-              waitMs = val > 10 ? val : val * 1000; // try best effort
+              // data.retry_after may be seconds or ms; handle both gently
+              waitMs = val > 10 ? val : val * 1000;
             }
           }
         } catch (e) {
-          // ignore parse errors, use backoff
+          // ignore parse error
         }
         await new Promise((r) => setTimeout(r, waitMs));
         return sendToDiscord(content, attempt + 1);
@@ -49,10 +80,9 @@ export default async function handler(req, res) {
       return response;
     }
 
-    // Forward the exact alert text to Discord
+    // Forward the exact alert text (preserving newlines)
     const discordResp = await sendToDiscord(body);
 
-    // If still error, surface it
     if (!discordResp.ok) {
       const text = await discordResp.text().catch(() => "");
       return res.status(500).json({
